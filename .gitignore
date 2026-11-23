@@ -1,0 +1,13 @@
+.env
+.env.local
+.env.worker
+supabase/.temp/
+supabase/.branches/
+node_modules/
+*.dump
+node_modules/
+.next/
+.env
+.env.*
+!.env.example
+*.log
