@@ -1,4 +1,4 @@
-project_id = "opentrack"
+﻿project_id = "opentrack"
 [api]
 enabled = true
 port = 54321
@@ -12,7 +12,7 @@ major_version = 15
 [studio]
 enabled = true
 port = 54323
-[inbucket]
+[local_smtp]
 enabled = true
 port = 54324
 [auth]
@@ -29,3 +29,4 @@ content_path = "./supabase/templates/confirm.html"
 [auth.email.template.recovery]
 subject = "Reset your OpenTrack password"
 content_path = "./supabase/templates/reset.html"
+
