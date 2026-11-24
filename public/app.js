@@ -69,7 +69,7 @@ async function admin(){
  const memberForm=(id,fields,label)=>fold(label,form(id,fields,label));
  let content=panel('Notification preferences',form('digest',field('enabled','Daily email digest',[['true','On'],['false','Off']],String((await rows('memberships',{workspace_id:w.id})).find(m=>m.user_id===me.id)?.digest)),'Save preference'))+memberForm('workspace',field('name','Business name','text','',true),'Create another workspace');
  if(role==='admin'){
- content=panel('Workspace settings',form('settings',field('name','Workspace name','text',w.name,true)+field('timezone','IANA timezone','text',w.timezone,true),'Save settings'))+panel('Team',people.map(x=>'<p>'+esc(x.email)+' · '+esc(x.role)+'</p>').join('')+memberForm('invite',field('email','Email','email','',true)+field('role','Role',roles),'Invite member')+memberForm('member',field('user','Member',personOptions())+field('role','New role',roles),'Change role')+memberForm('remove',field('user','Member',personOptions()),'Remove member'))+panel('Departments',deps.map(d=>esc(d.name)).join(', ')+memberForm('department',field('name','Department name','text','',true),'Create department')+memberForm('assign',field('user','Manager',personOptions().filter(([id])=>people.find(p=>p.id===id)?.role==='manager'))+field('department','Department',depOptions()),'Assign manager'))+content+panel('Archived matters',table(all.filter(m=>m.deleted)))+panel('Workspace activity',historyList(await rows('events',{workspace_id:w.id})));
+ content=panel('Workspace settings',form('settings',field('name','Workspace name','text',w.name,true)+field('timezone','IANA timezone','text',w.timezone,true),'Save settings'))+panel('Team',people.map(x=>'<p>'+esc(x.email)+' · '+esc(x.role)+'</p>').join('')+memberForm('invite',field('email','Email','email','',true)+field('role','Role',roles),'Invite member')+memberForm('member',field('user','Member',personOptions())+field('role','New role',roles),'Change role')+memberForm('remove',field('user','Member',personOptions()),'Remove member'))+panel('Departments',deps.map(d=>esc(d.name)).join(', ')+memberForm('department',field('name','Department name','text','',true),'Create department')+memberForm('assign',field('user','Manager',personOptions().filter(([id])=>people.find(p=>p.id===id)?.role==='manager'))+field('department','Department',depOptions()),'Assign manager'))+panel('Automation keys','<p>Keys let scheduled jobs read this workspace or create and update matters by their client / project reference. Each key acts as you. Copy a new key when it is shown; it cannot be shown again.</p>'+((await rpc('feed_tokens_list',{w:w.id})).map(k=>'<p>'+esc(k.label)+' · '+esc(k.scope)+' · created '+esc(k.created.slice(0,10))+' · last used '+esc(k.last_used?k.last_used.slice(0,10):'never')+(k.revoked?' · revoked':' '+btn('Revoke','revokekey',k.id))+'</p>').join('')||'<p>No keys yet.</p>')+memberForm('feedkey',field('label','Key name','text','',true)+field('scope','Access',[['read','Read only'],['write','Read and write']]),'Create key'))+content+panel('Archived matters',table(all.filter(m=>m.deleted)))+panel('Workspace activity',historyList(await rows('events',{workspace_id:w.id})));
  }return '<h1>'+esc(w.name)+'</h1>'+content;
 }
 const wa=(action,p)=>rpc('workspace_action',{w:w.id,action,p}),ma=(action,p)=>rpc('matter_action',{w:w.id,mid:mid||null,action,p});
@@ -87,6 +87,10 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='accept'){await rpc('workspace_action',{w:qp().get('workspace'),action:'accept',p:{token:qp().get('invite')}});return go({w:qp().get('workspace')});}
  if(a==='export'){return saveFile(new Blob([await api('export',{w:w.id})],{type:'text/csv'}),'OpenTrack.csv');}
  if(a==='download'){const f=await api('download',{id:v});return saveFile(new Blob([Uint8Array.from(atob(f.data),x=>x.charCodeAt(0))]),f.name);}
+ if(a==='revokekey'){if(!confirm('Revoke this key? Jobs using it will stop working.'))return
+await rpc('feed_token_revoke',{w:w.id,key_id:v})
+return load()
+}
  if(['delete','restore','removefile'].includes(a)&&confirm('Confirm this change?')){await ma(a,{file:v});await load();}
  });});
 document.addEventListener('submit',e=>{e.preventDefault();const f=e.target,b=e.submitter;if(b)b.disabled=true;task(async()=>{
@@ -97,6 +101,11 @@ document.addEventListener('submit',e=>{e.preventDefault();const f=e.target,b=e.s
  if(id==='workspace'){const wid=await rpc('create_workspace',{workspace_name:p.name});return go({w:wid});}
  if(id==='upload'){const file=p.attachment;if(file.size>2097152)throw Error('Choose a file up to 2 MB.');const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onerror=reject;r.onload=()=>resolve(r.result.split(',')[1]);r.readAsDataURL(file);});await ma('upload',{name:file.name,data});}
  else if(['create','edit','status','comment','share'].includes(id)){const record=await ma(id,p);if(id==='create')return go({w:w.id,matter:record});}
+ else if(id==='feedkey'){const k=await rpc('feed_token_create',{w:w.id,key_label:p.label,key_scope:p.scope})
+await load()
+note.textContent='Copy this key now. It will not be shown again.\n'+k
+return
+}
  else{if(id==='remove'&&!confirm('Remove this member from the workspace?'))return;const r=await wa(id,id==='digest'?{enabled:p.enabled==='true'}:p);if(id==='invite')note.textContent=r.sent?'Invitation emailed.':'Share this invitation link with '+p.email+'\n'+r.link;}
  await load();
  }).finally(()=>{if(b)b.disabled=false;});});

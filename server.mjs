@@ -1,7 +1,7 @@
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {randomBytes,createHash} from 'node:crypto';
-import {csv,sendEmail} from './core.mjs';
+import {csv,feedCsv,sendEmail} from './core.mjs';
 const base=process.env.SUPABASE_URL?.replace(/\/$/,'');
 const key=process.env.SUPABASE_PUBLISHABLE_KEY;
 const origin=new URL(process.env.APP_URL||'http://localhost:3000').origin;
@@ -12,7 +12,7 @@ setInterval(()=>{for(const [k,v] of rates)if(v.until<Date.now())rates.delete(k);
 function fail(message,status=400){throw Object.assign(Error(message),{status});}
 function limit(k,max){let r=rates.get(k);if(!r||r.until<Date.now()){r={until:Date.now()+60000,count:0};rates.set(k,r);}if(++r.count>max)fail('Too many requests. Try again shortly.',429);}
 const allowed=['workspaces','memberships','departments','matters','comments','events','intervals','notices'];
-const calls=['create_workspace','directory','workspace_action','matter_action','file_list'];
+const calls=['create_workspace','directory','workspace_action','matter_action','file_list','feed_token_create','feed_tokens_list','feed_token_revoke'];
 const staticFiles={'/':'index.html','/app.js':'app.js','/styles.css':'styles.css','/dates.js':'dates.js'};
 export const server=http.createServer(async(req,res)=>{
  const url=new URL(req.url,'http://localhost'), path=url.pathname;
@@ -32,6 +32,24 @@ export const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'");
  if(req.method==='GET'&&Object.hasOwn(staticFiles,path)){const f=staticFiles[path];res.setHeader('Content-Type',f.endsWith('html')?'text/html':f.endsWith('css')?'text/css':'text/javascript');return res.end(await readFile(new URL('./public/'+f,import.meta.url)));}
  if(path==='/health'){await upstream('/rest/v1/', 'GET',undefined,null);return json({status:'ready'});}
+ if(path==='/api/feed'||path==='/api/items'){
+ // Automation API: no cookies, no browser origin; an admin-issued key in the Authorization header.
+ const apiKey=/^Bearer (otk_[a-f0-9]{64})$/.exec(req.headers.authorization||'')?.[1];
+ if(!apiKey)fail('Send an automation key as: Authorization: Bearer otk_…',401);
+ limit('key:'+createHash('sha256').update(apiKey).digest('hex').slice(0,24),120);
+ try{
+ if(path==='/api/feed'){
+ if(req.method!=='GET')fail('Use GET',405);
+ const rows=[];for(let offset=0;;){const page=await upstream('/rest/v1/rpc/feed_read?limit=500&offset='+offset,'POST',{api_key:apiKey},null);rows.push(...page);if(page.length<500)break;offset+=page.length;}
+ if(url.searchParams.get('format')==='csv'){res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8'});return res.end(feedCsv(rows));}
+ return json(rows);}
+ if(req.method!=='POST'||!req.headers['content-type']?.startsWith('application/json'))fail('Use POST with a JSON body',405);
+ let chunks=[],size=0;for await(const chunk of req){size+=chunk.length;if(size>500000)fail('Request too large',413);chunks.push(chunk);}
+ let body;try{body=JSON.parse(Buffer.concat(chunks).toString()||'{}');}catch{fail('Invalid JSON');}
+ if(!Array.isArray(body.items))fail('Send {"items":[…]}');
+ return json(await upstream('/rest/v1/rpc/feed_write','POST',{api_key:apiKey,items:body.items},null));
+ }catch(e){if(e.message==='Invalid or revoked key')e.status=401;throw e;}
+ }
  if(req.method!=='POST'||req.headers.origin!==origin||!req.headers['content-type']?.startsWith('application/json'))fail('Invalid request',403);
  let chunks=[],size=0;for await(const chunk of req){size+=chunk.length;if(size>3000000)fail('File too large',413);chunks.push(chunk);}
  let p;try{p=JSON.parse(Buffer.concat(chunks).toString()||'{}');}catch{fail('Invalid JSON');}

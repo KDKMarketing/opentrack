@@ -57,3 +57,23 @@ The UI currently loads the authorized workspace result set before filtering or d
 
 ## Verification status of this package
 Five automated Node tests passed during packaging. The HTTP integration test uses a controlled auth response to test the server's cookie and request handling. The SQL suites need a running Supabase instance. An optional Playwright smoke test is included in test/browser_smoke.py. Its browser launch was blocked by the build environment's socket restriction. Actual desktop and mobile browser checks remain pending.
+
+## Automation keys (added 24 Nov 2026)
+Lets scheduled jobs read the tracker and create or update matters without a user password.
+
+**Deploy.** Back up first. Run `supabase db push --dry-run`, check that only `20261124000500_automation_keys.sql` is new, then `supabase db push`. Redeploy the Node service with this code. No new environment variables.
+
+**Create a key.** Workspace → Automation keys → Create key. Choose *Read only* for dashboards and reports, *Read and write* for jobs that update work. The key is shown once; store it in the job's secret settings, never in chat, a prompt or Git. A key acts as the administrator who created it and stops working if it is revoked, if that person stops being an administrator, or if the workspace is inactive. Every change it makes appears in Activity history as "automation: <key name>".
+
+**Read** — `GET /api/feed` (add `?format=csv` for CSV) with header `Authorization: Bearer otk_…`. Returns every live matter with ref, external_ref, title, category, department, owner, status, priority, opened, deadline, followup, waiting, closed_on, updated and `attention` (overdue · review_due · due_soon (within 2 days) · waiting · on_track · done). Descriptions, comments and files are not included.
+
+**Write** — `POST /api/items` with the same header and JSON `{"items":[…]}`, up to 100 items. Items are matched on `external_ref` (the "Client / project reference" field, e.g. a content-calendar ID like `B-02`):
+- no match → created; needs `title` and `department` (an existing department name)
+- match → fields sent are updated; `status` changes the status (Closed/Cancelled get a reason; On Hold also needs `followup`)
+- optional fields: `title, department, owner_email, priority, deadline, followup, waiting, category, description, status, reason`
+Each item succeeds or fails on its own; the response lists the result per item.
+
+    curl -s https://YOUR_APP/api/items -H "Authorization: Bearer $OT_KEY" -H "Content-Type: application/json" \
+      -d '{"items":[{"external_ref":"B-02","title":"GSTR-9C reconciliation blog","department":"Website content","deadline":"2026-11-30","status":"In Progress","waiting":"CA review"}]}'
+
+Rate limit: 120 requests per key per minute per server process.
